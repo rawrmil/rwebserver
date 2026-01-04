@@ -1,6 +1,7 @@
 #include <sys/socket.h> // socket
 #include <unistd.h> // close
 #include <netinet/in.h> // sockaddr_in
+#include <arpa/inet.h> // inet_ntoa
 
 #include <stdio.h>
 
@@ -29,7 +30,19 @@ int main(int argc, char** argv) {
 
 	printf("hello: %d\n", 6969);
 
-	while (1);
+	while (1) {
+		struct sockaddr_in client_addr;
+		socklen_t client_len = sizeof(client_addr);
+		int client_fd = accept(server_fd, (struct sockaddr*)&client_addr, &client_len);
+		if (client_fd < 0) {
+			perror("Accept error.");
+			return 1;
+		}
+		printf("connected:%s\n", inet_ntoa(client_addr.sin_addr));
+		char buf[1024] = {0};
+		read(client_fd, buf, sizeof(buf) - 1);
+		printf("req:%s\n", buf);
+	}
 
 	close(server_fd);
 	return 0;
