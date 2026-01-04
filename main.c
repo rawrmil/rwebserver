@@ -2,11 +2,13 @@
 #include <unistd.h> // close
 #include <netinet/in.h> // sockaddr_in
 #include <arpa/inet.h> // inet_ntoa
+#include <fcntl.h> // non blocking sockets
 
 #include <string.h>
 
 #include <stdio.h>
 #include <stdbool.h>
+#include <errno.h>
 
 #define RW_BACKLOG 10
 
@@ -15,12 +17,23 @@ typedef struct RW_Connection {
 	uint16_t port;
 } RW_Connection;
 
+bool rw_socket_nonblock(int fd) {
+	int flags = fcntl(fd, F_GETFL, 0);
+	if (flags == -1) { return false; }
+	if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1) {
+		return false;
+	}
+	return true;
+}
+
 bool rw_open_listener(RW_Connection* wc, uint16_t port) {
 	int server_fd = socket(AF_INET, SOCK_STREAM, 0);
 	if (server_fd == -1) {
 		perror("Socket error.");
 		return false;
 	}
+
+	rw_socket_nonblock(server_fd);
 
 	wc->fd = server_fd;
 	wc->port = port;
@@ -48,6 +61,9 @@ void rw_listen(RW_Connection* wc) {
 	socklen_t client_len = sizeof(client_addr);
 	int client_fd = accept(wc->fd, (struct sockaddr*)&client_addr, &client_len);
 	if (client_fd < 0) {
+		if (errno == EAGAIN || errno == EWOULDBLOCK) {
+			return;
+		}
 		perror("Accept error.");
 		return;
 	}
