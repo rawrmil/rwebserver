@@ -3,6 +3,8 @@
 #include <netinet/in.h> // sockaddr_in
 #include <arpa/inet.h> // inet_ntoa
 
+#include <string.h>
+
 #include <stdio.h>
 
 int main(int argc, char** argv) {
@@ -42,6 +44,13 @@ int main(int argc, char** argv) {
 		char buf[1024] = {0};
 		read(client_fd, buf, sizeof(buf) - 1);
 		printf("req:%s\n", buf);
+		char resp[] =
+			"HTTP/1.0 200 OK\r\n"
+			"Content-Type: text/html\r\n"
+			"Content-Length: 5\r\n"
+			"\r\n"
+			"hello";
+		write(client_fd, resp, strlen(resp));
 	}
 
 	close(server_fd);
