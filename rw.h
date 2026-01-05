@@ -51,10 +51,24 @@ typedef struct RW_StringView {
 
 /* Connection */
 
+typedef enum {
+    RW_EV_HTTP_MSG,
+    RW_EV_POLL,
+} RW_Event;
+
+typedef void (*RW_Handler)(RW_Event, void*);
+
 typedef struct RW_Connection {
 	int fd;
 	uint16_t port;
+	RW_Handler handler;
 } RW_Connection;
+
+typedef struct RW_HTTPMessage {
+	RW_StringView message;
+	RW_StringView method, uri, query, proto;
+	RW_StringView head, body;
+} RW_HTTPMessage;
 
 #endif /* RW_H */
 
@@ -73,7 +87,7 @@ bool rw_socket_nonblock(int fd) {
 	return true;
 }
 
-bool rw_open_listener(RW_Connection* wc, uint16_t port) {
+bool rw_open_listener(RW_Connection* wc, uint16_t port, RW_Handler handler) {
 	RW_LOG(RW_INFO, "port %lu", port);
 	int server_fd = socket(AF_INET, SOCK_STREAM, 0);
 	if (server_fd == -1) {
@@ -85,6 +99,7 @@ bool rw_open_listener(RW_Connection* wc, uint16_t port) {
 
 	wc->fd = server_fd;
 	wc->port = port;
+	wc->handler = handler;
 
 	struct sockaddr_in server_addr;
 	server_addr.sin_family = AF_INET;
@@ -116,24 +131,24 @@ RW_StringView rw_trim_until(RW_StringView* src, uint8_t c) {
 	return rw_sv(NULL, 0);
 }
 
-void rw_parse_http(RW_StringView sv) {
-	RW_StringView method = rw_trim_until(&sv, ' ');
-	if (method.buf == NULL) { return; }
+bool rw_parse_http(RW_HTTPMessage* hmp, RW_StringView sv) {
+	RW_HTTPMessage hm;
+	hm.method = rw_trim_until(&sv, ' ');
+	if (hm.method.buf == NULL) { return false; }
 
-	RW_StringView uri = rw_trim_until(&sv, ' ');
-	if (uri.buf == NULL) { return; }
+	hm.uri = rw_trim_until(&sv, ' ');
+	if (hm.uri.buf == NULL) { return false; }
 
-	RW_StringView version = rw_trim_until(&sv, '\r');
-	if (version.buf == NULL) { return; }
+	hm.proto = rw_trim_until(&sv, '\r');
+	if (hm.proto.buf == NULL) { return false; }
 
-	if (sv.len < 1) { return; }
-	if (sv.buf[0] != '\n') { return; }
+	if (sv.len < 1) { return false; }
+	if (sv.buf[0] != '\n') { return false; }
 	sv.len--;
 	sv.buf++;
 
-	RW_LOG(RW_INFO, "method: '"rw_sv_fmt"'", rw_sv_arg(method));
-	RW_LOG(RW_INFO, "uri: '"rw_sv_fmt"'", rw_sv_arg(uri));
-	RW_LOG(RW_INFO, "version: '"rw_sv_fmt"'", rw_sv_arg(version));
+	*hmp = hm;
+	return true;
 }
 
 void rw_listen(RW_Connection* wc) {
@@ -154,7 +169,12 @@ void rw_listen(RW_Connection* wc) {
 		RW_LOG(RW_ERROR, "read error");
 		return;
 	}
-	rw_parse_http(rw_sv(buf, len));
+	RW_HTTPMessage hm;
+	if (!rw_parse_http(&hm, rw_sv(buf, len))) {
+		RW_LOG(RW_ERROR, "http handler failed");
+		return;
+	}
+	if (wc->handler != NULL) { wc->handler(RW_EV_HTTP_MSG, &hm); }
 	char resp[] =
 		"HTTP/1.0 200 OK\r\n"
 		"Content-Type: text/html\r\n"
