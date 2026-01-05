@@ -119,27 +119,38 @@ bool rw_open_listener(RW_Connection* wc, uint16_t port, RW_Handler handler) {
 	return true;
 }
 
-RW_StringView rw_trim_until(RW_StringView* src, uint8_t c) {
+RW_StringView rw_trim_inline(RW_StringView* src, uint8_t c) {
 	RW_StringView old = *src;
-	while (src->len > 0) {
+	for (size_t i = 0; i < 4096; i++) {
+		if (src->len == 0) { break; }
 		src->buf++;
 		src->len--;
 		if (src->buf[-1] == c) {
 			return rw_sv(old.buf, old.len - src->len - 1);
 		}
+		if (src->buf[-1] == '\r') { break; }
 	}
 	return rw_sv(NULL, 0);
 }
 
 bool rw_parse_http(RW_HTTPMessage* hmp, RW_StringView sv) {
-	RW_HTTPMessage hm;
-	hm.method = rw_trim_until(&sv, ' ');
+	RW_HTTPMessage hm = {0};
+	hm.message = sv;
+	hm.method = rw_trim_inline(&sv, ' ');
 	if (hm.method.buf == NULL) { return false; }
 
-	hm.uri = rw_trim_until(&sv, ' ');
-	if (hm.uri.buf == NULL) { return false; }
+	RW_StringView last = sv;
+	hm.uri = rw_trim_inline(&sv, '?');
+	if (hm.uri.buf == NULL) {
+		sv = last;
+		hm.uri = rw_trim_inline(&sv, ' ');
+		if (hm.uri.buf == NULL) { return false; }
+	} else {
+		hm.query = rw_trim_inline(&sv, ' ');
+		if (hm.query.buf == NULL) { return false; }
+	}
 
-	hm.proto = rw_trim_until(&sv, '\r');
+	hm.proto = rw_trim_inline(&sv, '\r');
 	if (hm.proto.buf == NULL) { return false; }
 
 	if (sv.len < 1) { return false; }
