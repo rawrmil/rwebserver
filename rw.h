@@ -1,6 +1,8 @@
 #ifndef RW_H
 #define RW_H
 
+#include <stdlib.h>
+#include <stdarg.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #include <netinet/in.h>
@@ -8,6 +10,35 @@
 #include <fcntl.h>
 
 #define RW_BACKLOG 10
+
+/* Logging System */
+
+typedef enum {
+    RW_INFO,
+    RW_WARNING,
+    RW_ERROR,
+    RW_NONE,
+} RW_LogLevel;
+
+extern RW_LogLevel rw_log_level;
+
+#define RW_UNREACHABLE(message) do { fprintf(stderr, "%s:%d: UNREACHABLE: %s\n", __FILE__, __LINE__, message); abort(); } while(0)
+#define RW_LOG(level_, ...) \
+	do { \
+		if ((level_) < rw_log_level) { break; } \
+		if ((level_) == RW_NONE) { break; } \
+		switch ((level_)) { \
+			case RW_INFO: fprintf(stdout, "[INFO] "); break; \
+			case RW_WARNING: fprintf(stdout, "[WARN] "); break; \
+			case RW_ERROR: fprintf(stdout, "[ERR] "); break; \
+			default: RW_UNREACHABLE("nob_log"); \
+		} \
+		fprintf(stdout, "%s:%d:%s: ", __FILE__, __LINE__, __func__); \
+		fprintf(stdout, __VA_ARGS__); \
+		fprintf(stdout, "\n"); \
+	} while(0);
+
+/* String View */
 
 typedef struct RW_StringView {
 	uint8_t* buf;
@@ -18,6 +49,8 @@ typedef struct RW_StringView {
 #define rw_sv_fmt "%.*s"
 #define rw_sv_arg(sv) (int)(sv).len, (sv).buf
 
+/* Connection */
+
 typedef struct RW_Connection {
 	int fd;
 	uint16_t port;
@@ -26,6 +59,10 @@ typedef struct RW_Connection {
 #endif /* RW_H */
 
 #ifdef RW_IMPLEMENTATION
+
+/* Logging System */
+
+RW_LogLevel rw_log_level;
 
 bool rw_socket_nonblock(int fd) {
 	int flags = fcntl(fd, F_GETFL, 0);
@@ -37,9 +74,10 @@ bool rw_socket_nonblock(int fd) {
 }
 
 bool rw_open_listener(RW_Connection* wc, uint16_t port) {
+	RW_LOG(RW_INFO, "port %lu", port);
 	int server_fd = socket(AF_INET, SOCK_STREAM, 0);
 	if (server_fd == -1) {
-		perror("Socket error.");
+		RW_LOG(RW_ERROR, "socket error");
 		return false;
 	}
 
@@ -54,12 +92,12 @@ bool rw_open_listener(RW_Connection* wc, uint16_t port) {
 	server_addr.sin_port = htons(port);
 
 	if (bind(server_fd, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
-		perror("Binding error.");
+		RW_LOG(RW_ERROR, "binding error");
 		return false;
 	}
 
 	if (listen(server_fd, RW_BACKLOG) < 0) {
-		perror("Listen error.");
+		RW_LOG(RW_ERROR, "listen error");
 		return false;
 	}
 
@@ -93,9 +131,9 @@ void rw_parse_http(RW_StringView sv) {
 	sv.len--;
 	sv.buf++;
 
-	printf("method: '"rw_sv_fmt"', ", rw_sv_arg(method));
-	printf("uri: '"rw_sv_fmt"', ", rw_sv_arg(uri));
-	printf("version: '"rw_sv_fmt"'\n", rw_sv_arg(version));
+	RW_LOG(RW_INFO, "method: '"rw_sv_fmt"'", rw_sv_arg(method));
+	RW_LOG(RW_INFO, "uri: '"rw_sv_fmt"'", rw_sv_arg(uri));
+	RW_LOG(RW_INFO, "version: '"rw_sv_fmt"'", rw_sv_arg(version));
 }
 
 void rw_listen(RW_Connection* wc) {
@@ -106,14 +144,14 @@ void rw_listen(RW_Connection* wc) {
 		if (errno == EAGAIN || errno == EWOULDBLOCK) {
 			return;
 		}
-		perror("Accept error.");
+		RW_LOG(RW_ERROR, "accept error");
 		return;
 	}
-	printf("connected:%s\n", inet_ntoa(client_addr.sin_addr));
+	RW_LOG(RW_INFO, "connected %s", inet_ntoa(client_addr.sin_addr));
 	char buf[1024] = {0};
 	ssize_t len = read(client_fd, buf, sizeof(buf) - 1);
 	if (len < 0) {
-		perror("Read error.");
+		RW_LOG(RW_ERROR, "read error");
 		return;
 	}
 	rw_parse_http(rw_sv(buf, len));
