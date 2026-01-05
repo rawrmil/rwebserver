@@ -56,13 +56,15 @@ typedef enum {
     RW_EV_POLL,
 } RW_Event;
 
-typedef void (*RW_Handler)(RW_Event, void*);
+typedef struct RW_Connection RW_Connection;
 
-typedef struct RW_Connection {
+typedef void (*RW_Handler)(RW_Connection*, RW_Event, void*);
+
+struct RW_Connection {
 	int fd;
 	uint16_t port;
-	RW_Handler handler;
-} RW_Connection;
+	RW_Handler handler; // User Handler
+};
 
 typedef struct RW_HTTPMessage {
 	RW_StringView message;
@@ -87,7 +89,7 @@ bool rw_socket_nonblock(int fd) {
 	return true;
 }
 
-bool rw_open_listener(RW_Connection* wc, uint16_t port, RW_Handler handler) {
+bool rw_http_listen(RW_Connection* c, uint16_t port, RW_Handler handler) {
 	RW_LOG(RW_INFO, "port %lu", port);
 	int server_fd = socket(AF_INET, SOCK_STREAM, 0);
 	if (server_fd == -1) {
@@ -97,9 +99,9 @@ bool rw_open_listener(RW_Connection* wc, uint16_t port, RW_Handler handler) {
 
 	rw_socket_nonblock(server_fd);
 
-	wc->fd = server_fd;
-	wc->port = port;
-	wc->handler = handler;
+	c->fd = server_fd;
+	c->port = port;
+	c->handler = handler;
 
 	struct sockaddr_in server_addr;
 	server_addr.sin_family = AF_INET;
@@ -162,10 +164,10 @@ bool rw_parse_http(RW_HTTPMessage* hmp, RW_StringView sv) {
 	return true;
 }
 
-void rw_listen(RW_Connection* wc) {
+void rw_listen(RW_Connection* c) {
 	struct sockaddr_in client_addr;
 	socklen_t client_len = sizeof(client_addr);
-	int client_fd = accept(wc->fd, (struct sockaddr*)&client_addr, &client_len);
+	int client_fd = accept(c->fd, (struct sockaddr*)&client_addr, &client_len);
 	if (client_fd < 0) {
 		if (errno == EAGAIN || errno == EWOULDBLOCK) {
 			return;
@@ -185,7 +187,7 @@ void rw_listen(RW_Connection* wc) {
 		RW_LOG(RW_ERROR, "http handler failed");
 		return;
 	}
-	if (wc->handler != NULL) { wc->handler(RW_EV_HTTP_MSG, &hm); }
+	if (c->handler != NULL) { c->handler(c, RW_EV_HTTP_MSG, &hm); }
 	char resp[] =
 		"HTTP/1.0 200 OK\r\n"
 		"Content-Type: text/html\r\n"
