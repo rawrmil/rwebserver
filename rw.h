@@ -9,6 +9,15 @@
 
 #define RW_BACKLOG 10
 
+typedef struct RW_StringView {
+	uint8_t* buf;
+	size_t len;
+} RW_StringView;
+
+#define rw_sv(buf_, len_) (RW_StringView){ .buf=(buf_), .len=(len_) }
+#define rw_sv_fmt "%.*s"
+#define rw_sv_arg(sv) (int)(sv).len, (sv).buf
+
 typedef struct RW_Connection {
 	int fd;
 	uint16_t port;
@@ -57,6 +66,38 @@ bool rw_open_listener(RW_Connection* wc, uint16_t port) {
 	return true;
 }
 
+RW_StringView rw_trim_until(RW_StringView* src, uint8_t c) {
+	RW_StringView old = *src;
+	while (src->len > 0) {
+		src->buf++;
+		src->len--;
+		if (src->buf[-1] == c) {
+			return rw_sv(old.buf, old.len - src->len - 1);
+		}
+	}
+	return rw_sv(NULL, 0);
+}
+
+void rw_parse_http(RW_StringView sv) {
+	RW_StringView method = rw_trim_until(&sv, ' ');
+	if (method.buf == NULL) { return; }
+
+	RW_StringView uri = rw_trim_until(&sv, ' ');
+	if (uri.buf == NULL) { return; }
+
+	RW_StringView version = rw_trim_until(&sv, '\r');
+	if (version.buf == NULL) { return; }
+
+	if (sv.len < 1) { return; }
+	if (sv.buf[0] != '\n') { return; }
+	sv.len--;
+	sv.buf++;
+
+	printf("method: '"rw_sv_fmt"', ", rw_sv_arg(method));
+	printf("uri: '"rw_sv_fmt"', ", rw_sv_arg(uri));
+	printf("version: '"rw_sv_fmt"'\n", rw_sv_arg(version));
+}
+
 void rw_listen(RW_Connection* wc) {
 	struct sockaddr_in client_addr;
 	socklen_t client_len = sizeof(client_addr);
@@ -70,8 +111,12 @@ void rw_listen(RW_Connection* wc) {
 	}
 	printf("connected:%s\n", inet_ntoa(client_addr.sin_addr));
 	char buf[1024] = {0};
-	read(client_fd, buf, sizeof(buf) - 1);
-	printf("req:%s\n", buf);
+	ssize_t len = read(client_fd, buf, sizeof(buf) - 1);
+	if (len < 0) {
+		perror("Read error.");
+		return;
+	}
+	rw_parse_http(rw_sv(buf, len));
 	char resp[] =
 		"HTTP/1.0 200 OK\r\n"
 		"Content-Type: text/html\r\n"
